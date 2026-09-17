@@ -41,6 +41,12 @@ The exact role of `192.168.100.101` varies between captures. It is used as the z
 
 ### 1. Default Nmap Scan
 
+<p align="center">
+  <img src="screenshots/01-standard-syn-scan.png"/>
+  <br/>
+  <em>Standard SYN Scan</em>
+</p>
+
 The standard scan capture contains approximately:
 
 ```text
@@ -112,6 +118,12 @@ tcp.flags.ack == 0
 
 ### 2. ACK Scan
 
+<p align="center">
+  <img src="screenshots/02-ack-scan.png"/>
+  <br/>
+  <em>ACK Scan</em>
+</p>
+
 A separate capture contains an ACK scan directed specifically at TCP port 80.
 
 The traffic contains packets such as:
@@ -159,6 +171,12 @@ tcp.dstport == 80
 ---
 
 ### 3. Fragmented and Source-Spoofed ACK Scan
+
+<p align="center">
+  <img src="screenshots/03-fragmented-spoofed-scan.png"/>
+  <br/>
+  <em>Fragmented Spoofed IP Scan Scan</em>
+</p>
 
 Another ACK scan attempts to make detection more difficult by using both:
 
@@ -218,6 +236,12 @@ The spoofed address also demonstrates why a packet's source IP should not always
 ---
 
 ### 4. Idle / Zombie Scan
+
+<p align="center">
+  <img src="screenshots/04-zombie-ipid.png"/>
+  <br/>
+  <em>Zombie IPID Scan</em>
+</p>
 
 The zombie scan is the most complex technique in the collection.
 
@@ -382,6 +406,12 @@ The scan therefore fails to produce a successful operating-system identification
 ---
 
 ### 6. Successful OS Fingerprinting
+
+<p align="center">
+  <img src="screenshots/05-os-fingerprint-open-port.png"/>
+  <br/>
+  <em>OF Fingerprint Scan With Open Port</em>
+</p>
 
 The successful OS scan instead targets:
 
