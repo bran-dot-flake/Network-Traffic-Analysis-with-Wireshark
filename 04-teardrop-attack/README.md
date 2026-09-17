@@ -2,372 +2,215 @@
 
 ## Scenario
 
-A packet capture containing suspicious IPv4 fragmentation was analyzed to identify characteristics associated with a Teardrop-style denial-of-service attack.
+This capture was very small, but two packets stood out because they were fragments of the same IPv4 datagram.
 
-The capture contains only 17 packets, with the malicious behavior concentrated in two UDP/IP fragments sent from:
+I wanted to figure out whether the fragmentation was normal or malformed.
 
-```text
+The suspicious traffic was:
+
+```text id="x8v26m"
 10.1.1.1 -> 129.111.30.27
 ```
 
-Inspection of the fragment offsets and lengths reveals that the second fragment overlaps data already contained in the first fragment.
+Both packets shared the same IP Identification value, which meant they belonged to the same original datagram.
 
-Overlapping IPv4 fragments are the defining behavior demonstrated by this capture.
-
-## Objectives
-
-* Identify fragmented IPv4 traffic
-* Determine which fragments belong to the same datagram
-* Calculate the byte ranges represented by each fragment
-* Identify overlapping fragment data
-* Explain why malformed fragmentation can affect packet reassembly
-* Develop useful Wireshark filters for detecting fragmentation anomalies
+The interesting part came when I compared their offsets.
 
 ## Initial Triage
 
-| Item                  | Finding                    |
-| --------------------- | -------------------------- |
-| Total Packets         | 17                         |
-| Suspicious Source     | `10.1.1.1`                 |
-| Target                | `129.111.30.27`            |
-| Protocol              | UDP over IPv4              |
-| Source Port           | `31915`                    |
-| Destination Port      | `20197`                    |
-| IP Identification     | `242`                      |
-| Suspicious Fragments  | 2                          |
-| Attack Characteristic | Overlapping IPv4 fragments |
+| Item                 | Finding                   |
+| -------------------- | ------------------------- |
+| Source               | `10.1.1.1`                |
+| Target               | `129.111.30.27`           |
+| Protocol             | UDP over IPv4             |
+| IP Identification    | `242`                     |
+| Suspicious Fragments | 2                         |
+| Main Finding         | Overlapping fragment data |
 
-Most packets in the capture are unrelated background traffic.
-
-The Teardrop behavior occurs in two adjacent packets carrying fragments of the same IPv4 datagram.
+Most of the capture was unrelated background traffic, so I focused on the two fragments with IP ID `242`.
 
 ---
 
-## Analysis
+## First Fragment
 
-### 1. Fragmented IPv4 Datagram Identified
+The first packet showed:
 
-The suspicious packets originate from:
-
-```text
-10.1.1.1
-```
-
-and are sent to:
-
-```text
-129.111.30.27
-```
-
-Both packets contain:
-
-```text
-Identification: 242
-```
-
-The IPv4 Identification field allows the receiving system to associate fragments belonging to the same original datagram.
-
-The first fragment contains:
-
-```text
-Source: 10.1.1.1
-Destination: 129.111.30.27
-Protocol: UDP
-
+```text id="aqw7lu"
 IP Identification: 242
 Fragment Offset: 0
 More Fragments: Set
-
 IP Payload Length: 36 bytes
-```
-
-Because the first fragment begins at offset `0`, its payload occupies bytes:
-
-```text
-0 - 35
-```
-
-of the reconstructed IP payload.
-
-It also contains the UDP header, revealing:
-
-```text
-Source Port: 31915
-Destination Port: 20197
 ```
 
 <p align="center">
   <img src="screenshots/01-first-fragment.png"/>
   <br/>
-  <em>First Fragment</em>
+  <em>First IPv4 fragment</em>
 </p>
+
+Since the fragment starts at offset `0` and contains 36 bytes of IP payload, it covers:
+
+```text id="jx3ps2"
+Bytes 0-35
+```
+
+Because this is the first fragment, it also contains the UDP header:
+
+```text id="l4r5e9"
+Source Port: 31915
+Destination Port: 20197
+```
+
+So far, nothing looked unusual. The first fragment simply contained the beginning of a larger datagram.
 
 ---
 
-### 2. Second Fragment Examined
+## Second Fragment
 
-The following packet has the same:
+The next packet had the same:
 
-```text
+```text id="tyf16d"
 Source IP
 Destination IP
 Protocol
 IP Identification
 ```
 
-indicating that it belongs to the same fragmented datagram.
+which tied it to the same fragmented datagram.
 
-Its IPv4 fields show:
+Its important fields were:
 
-```text
+```text id="qz1m4p"
 IP Identification: 242
 Fragment Offset: 3
 More Fragments: Not Set
-
 IP Payload Length: 4 bytes
-```
-
-IPv4 fragment offsets are measured in units of eight bytes.
-
-Therefore:
-
-```text
-Fragment Offset = 3 × 8
-                = 24 bytes
-```
-
-The second fragment therefore represents payload bytes:
-
-```text
-24 - 27
 ```
 
 <p align="center">
   <img src="screenshots/02-overlapping-fragment.png"/>
   <br/>
-  <em>Second Fragment</em>
+  <em>Second fragment with an overlapping offset</em>
 </p>
 
----
+IPv4 fragment offsets are measured in 8-byte units, so:
 
-### 3. Fragment Overlap Identified
-
-The two fragments cover the following byte ranges:
-
-```text
-Fragment 1: 0 ------------------------- 35
-Fragment 2:                 24 --- 27
+```text id="xr39do"
+3 × 8 = 24
 ```
 
-More explicitly:
+That means this fragment starts at byte `24`.
 
-```text
-Fragment 1:
-Bytes 0-35
+With a payload length of 4 bytes, it covers:
 
-Fragment 2:
+```text id="knw0ci"
 Bytes 24-27
 ```
 
-The second fragment starts at byte 24 even though the first fragment already extends through byte 35.
+That immediately looked wrong.
 
-Therefore bytes:
+---
 
-```text
+## Finding the Overlap
+
+Comparing the two fragments:
+
+```text id="1at7uk"
+Fragment 1: Bytes 0-35
+Fragment 2: Bytes 24-27
+```
+
+The second fragment starts before the first one has finished.
+
+That means bytes:
+
+```text id="n3oc5c"
 24
 25
 26
 27
 ```
 
-are supplied twice.
+are present in both fragments.
 
-This creates a:
+So the overlap is:
 
-```text
-4-byte overlap
+```text id="3153t8"
+4 bytes
 ```
 
-between the IPv4 fragments.
+This was the main indicator I was looking for.
 
-This malformed overlap is the principal indicator of the Teardrop-style fragmentation behavior present in the capture.
+Instead of cleanly continuing where the first fragment ended, the second fragment supplied data for byte positions that had already been provided.
+
+That malformed overlap is characteristic of a Teardrop-style fragmentation attack.
 
 ---
 
-## Normal vs. Malformed Fragmentation
+## Why This Matters
 
-Normal IPv4 fragmentation divides a large datagram into non-overlapping sections.
+Normally, IP fragments should fit together without conflicting with each other.
 
-For example:
+Something like:
 
-```text
+```text id="8z1phk"
 Fragment 1: Bytes 0-999
 Fragment 2: Bytes 1000-1999
 Fragment 3: Bytes 2000-2499
 ```
 
-Each fragment continues where the previous fragment ended.
+In this capture, the layout instead looked like:
 
-The observed traffic instead resembles:
-
-```text
+```text id="s5i8sl"
 Fragment 1: Bytes 0-35
-Fragment 2: Bytes 24-27
+Fragment 2:         Bytes 24-27
 ```
 
-The receiver must therefore determine how to handle two fragments claiming to contain data for the same portion of the original datagram.
+The receiving system now has two fragments claiming to contain data for the same part of the original packet.
+
+Historically, some operating systems handled malformed overlapping fragments poorly, which made this technique useful for denial-of-service attacks.
+
+Even on modern systems, overlapping fragments are still interesting from a security perspective because different devices may interpret or reassemble them differently.
+
+That can matter when comparing how:
+
+```text id="j8dt2o"
+Endpoints
+Firewalls
+IDS/IPS systems
+```
+
+see the same traffic.
 
 ---
 
-## Why Fragment Overlap Matters
+## Fragment Comparison
 
-IPv4 fragmentation requires the destination system to reconstruct the original packet before processing the encapsulated transport-layer data.
+| Field              | Fragment 1 | Fragment 2 |
+| ------------------ | ---------: | ---------: |
+| IP Identification  |      `242` |      `242` |
+| Fragment Offset    |        `0` |        `3` |
+| Actual Byte Offset |        `0` |       `24` |
+| Payload Length     | `36 bytes` |  `4 bytes` |
+| More Fragments     |        Set |    Not Set |
+| Payload Range      |     `0-35` |    `24-27` |
 
-Reassembly relies on fields including:
+The matching Identification value showed that the packets belonged to the same datagram.
 
-```text
-Source IP
-Destination IP
-Protocol
-Identification
-Fragment Offset
-More Fragments flag
-```
-
-Historically, some operating-system network stacks handled malformed and overlapping fragments incorrectly.
-
-Teardrop-style attacks deliberately create conflicting fragment layouts in an attempt to trigger errors during reassembly.
-
-Older vulnerable systems could crash or become unstable when processing these malformed fragments, resulting in denial of service.
-
-Modern operating systems generally handle this specific historical attack safely, but overlapping fragments remain security-relevant because they can also create inconsistencies between:
-
-```text
-Endpoint interpretation
-Firewall interpretation
-IDS/IPS interpretation
-```
-
-This is why modern network security tools commonly perform IP fragment reassembly before inspecting higher-layer traffic.
-
----
-
-## Packet Comparison
-
-| Field              |      Fragment 1 |      Fragment 2 |
-| ------------------ | --------------: | --------------: |
-| Source             |      `10.1.1.1` |      `10.1.1.1` |
-| Destination        | `129.111.30.27` | `129.111.30.27` |
-| Protocol           |             UDP |    UDP fragment |
-| IP Identification  |           `242` |           `242` |
-| Fragment Offset    |             `0` |             `3` |
-| Actual Byte Offset |             `0` |            `24` |
-| IP Payload Length  |      `36` bytes |       `4` bytes |
-| More Fragments     |             Set |         Not Set |
-| Payload Range      |          `0-35` |         `24-27` |
-
-The identical Identification value and endpoint information establish that the two packets belong to the same fragmented IPv4 datagram.
-
-The conflicting byte ranges establish the overlap.
-
----
-
-## Indicators and Artifacts
-
-| Type                        | Value           |
-| --------------------------- | --------------- |
-| Source IP                   | `10.1.1.1`      |
-| Destination IP              | `129.111.30.27` |
-| Protocol                    | UDP             |
-| Source Port                 | `31915`         |
-| Destination Port            | `20197`         |
-| IP Identification           | `242`           |
-| First Fragment Offset       | `0`             |
-| Second Fragment Offset      | `3`             |
-| Second Fragment Byte Offset | `24`            |
-| Overlap                     | `4 bytes`       |
-
-These values are artifacts from the sample capture and are not general-purpose indicators of compromise.
-
----
-
-## Detection Opportunities
-
-### Identify Fragmented IPv4 Traffic
-
-A useful Wireshark filter is:
-
-```text
-ip.flags.mf == 1 || ip.frag_offset > 0
-```
-
-This identifies packets that either:
-
-* indicate additional fragments follow, or
-* begin somewhere after the start of the original datagram.
-
----
-
-### Isolate the Suspicious Datagram
-
-The fragments in this capture can be isolated using:
-
-```text
-ip.id == 0x00f2
-```
-
-Wireshark may display IP ID `242` as hexadecimal:
-
-```text
-0x00f2
-```
-
-The endpoints can also be included:
-
-```text
-ip.src == 10.1.1.1 &&
-ip.dst == 129.111.30.27
-```
-
----
-
-### Detect Fragment Overlap
-
-Wireshark's IPv4 reassembly analysis may identify malformed or overlapping fragment behavior.
-
-Fields and expert information related to:
-
-```text
-Fragment offset
-Reassembled IPv4
-Fragment overlap
-Fragment overlap conflict
-```
-
-are especially useful when investigating suspicious fragmentation.
-
-The important analytical step is to compare:
-
-```text
-Fragment offset
-+
-Fragment payload length
-```
-
-between packets sharing the same IP Identification value.
+The overlapping byte ranges showed that the fragmentation was malformed.
 
 ---
 
 ## Useful Wireshark Filters
 
-```text
+```text id="48iixv"
 # All fragmented IPv4 traffic
 ip.flags.mf == 1 || ip.frag_offset > 0
 
 # Suspicious source
 ip.src == 10.1.1.1
 
-# Source and target
+# Source and destination
 ip.src == 10.1.1.1 &&
 ip.dst == 129.111.30.27
 
@@ -378,30 +221,31 @@ ip.id == 0x00f2
 udp || ip.frag_offset > 0
 ```
 
-## Security Significance
+Wireshark's fragment reassembly information can also help identify things like:
 
-The capture demonstrates how malformed IPv4 fragmentation can be used as an attack technique.
+```text id="u48z8j"
+Fragment overlap
+Fragment overlap conflict
+Reassembled IPv4
+```
 
-Rather than sending independent packets, the attacker constructs fragments that appear to belong to the same original datagram but provide conflicting data for the same byte positions.
+But the most useful part of this investigation was manually comparing the fragment offset and payload length.
 
-The receiving system must attempt to reassemble these fragments before the UDP datagram can be processed.
+---
 
-Historically vulnerable systems could fail while handling these malformed overlapping ranges, allowing specially constructed packets to cause denial of service.
+## Takeaway
 
-The capture also illustrates a broader network-security concern: fragmentation can make packet inspection more difficult because transport-layer information may be distributed across multiple packets.
+This capture was a good example of how a small amount of traffic can still reveal something important.
 
-Effective network monitoring therefore needs to consider packet reassembly rather than evaluating each fragment independently.
+Both packets looked like ordinary IPv4 fragments at first. The key was comparing their Identification values, offsets, and payload lengths.
 
-## Conclusion
+Once I converted the second fragment's offset from `3` to byte `24`, the problem became obvious:
 
-Analysis identified two malformed IPv4 fragments sent from `10.1.1.1` to `129.111.30.27`.
+```text id="7cc5aa"
+Fragment 1: 0-35
+Fragment 2: 24-27
+```
 
-Both packets use IP Identification value `242`, establishing that they belong to the same fragmented UDP datagram.
+The second fragment overlapped four bytes already contained in the first.
 
-The first fragment contains 36 bytes of IP payload beginning at offset zero, covering bytes `0-35`.
-
-The second fragment has an IPv4 fragment offset of `3`. Because fragment offsets are measured in eight-byte units, this corresponds to byte `24`. Its four-byte payload therefore occupies bytes `24-27`.
-
-Those four bytes fall entirely within the byte range already supplied by the first fragment, creating a four-byte overlap.
-
-This malformed fragmentation pattern demonstrates the fundamental mechanism of a Teardrop-style attack and highlights the importance of IPv4 reassembly when analyzing potentially malicious network traffic.
+That malformed reassembly pattern is what identified the traffic as a Teardrop-style fragmentation attack.
