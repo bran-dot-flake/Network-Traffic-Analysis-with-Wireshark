@@ -1,428 +1,169 @@
-# SSL/TLS Traffic Decryption with an RSA Private Key
+# TLS Traffic Decryption with an RSA Private Key
 
 ## Scenario
 
-An encrypted SSL/TLS packet capture was analyzed together with a supplied RSA private key.
+This capture contained HTTPS traffic along with a supplied RSA private key.
 
-Without decryption, the capture exposes the TCP connection and SSL/TLS handshake but hides the application-layer HTTP requests and responses inside encrypted Application Data records.
+At first, Wireshark could show me the TLS handshake and connection details, but the actual web traffic was hidden inside encrypted Application Data.
 
-After the appropriate private key is configured in Wireshark, portions of the encrypted session can be decrypted and dissected as HTTP.
-
-This case demonstrates:
-
-* TLS/SSL handshake analysis
-* Identification of an encrypted cipher suite
-* The limitations of inspecting encrypted application traffic
-* RSA-based TLS decryption
-* Recovery of HTTP requests from encrypted traffic
-* Why modern forward-secret TLS configurations behave differently
-
-## Objectives
-
-* Identify the TLS client and server
-* Examine the SSL/TLS handshake
-* Determine the negotiated protocol and cipher suite
-* Observe encrypted Application Data
-* Configure the supplied RSA private key
-* Recover HTTP application-layer traffic
-* Compare visibility before and after decryption
+I wanted to see whether the supplied key was enough to decrypt the session and recover the underlying HTTP traffic.
 
 ## Initial Triage
 
-| Item             | Finding                  |
-| ---------------- | ------------------------ |
-| Total Packets    | 58                       |
-| Capture Duration | ~12.37 seconds           |
-| Client           | `127.0.0.1`              |
-| Server           | `127.0.0.1`              |
-| Server Port      | TCP/443                  |
-| Connections      | 2                        |
-| Protocol         | SSL 3.0                  |
-| Cipher Suite     | RSA with AES-256-CBC-SHA |
-| Cipher ID        | `0x0035`                 |
-| Supplied Key     | RSA Private Key          |
-| RSA Key Size     | 1024 bits                |
+| Item            | Finding                        |
+| --------------- | ------------------------------ |
+| Client / Server | `127.0.0.1`                    |
+| Server Port     | TCP/443                        |
+| Protocol        | SSL 3.0                        |
+| Cipher Suite    | `TLS_RSA_WITH_AES_256_CBC_SHA` |
+| Cipher ID       | `0x0035`                       |
+| Supplied Key    | RSA Private Key                |
+| RSA Key Size    | 1024 bits                      |
 
-Two TLS connections are visible:
+Two HTTPS connections were present:
 
 ```text
 127.0.0.1:38713 -> 127.0.0.1:443
 127.0.0.1:38714 -> 127.0.0.1:443
 ```
 
-Because both endpoints use the loopback address, the client and HTTPS server were operating on the same system when the traffic was captured.
+Since both sides use the loopback address, the browser and web server were running on the same machine when the capture was taken.
 
 ---
 
-## Analysis
+## Looking at the TLS Handshake
 
-### 1. TCP Connection Established
-
-Before encrypted communication begins, the client establishes a normal TCP connection to:
-
-```text
-127.0.0.1:443
-```
-
-TCP port 443 conventionally indicates HTTPS.
-
-The first connection uses:
-
-```text
-Client Port: 38713
-Server Port: 443
-```
-
-and begins with the standard:
-
-```text
-SYN
-SYN/ACK
-ACK
-```
-
-three-way handshake.
-
-Useful filter:
+I started with:
 
 ```text
 tcp.port == 443
 ```
 
-At this stage, TCP metadata such as endpoints, ports, packet sizes, and timing remain visible even though the eventual application data is encrypted.
+and followed the first connection.
 
----
+After the TCP handshake, the server returned an SSL/TLS `Server Hello`.
 
-### 2. SSL/TLS Handshake Begins
-
-Following the TCP handshake, the client initiates cryptographic negotiation.
-
-The server responds with an SSL/TLS:
+The important fields were:
 
 ```text
-Server Hello
+Version: SSL 3.0
+Cipher Suite: 0x0035
 ```
 
-and selects protocol version:
-
-```text
-SSL 3.0
-```
-
-represented as:
-
-```text
-0x0300
-```
-
-The Server Hello also selects cipher suite:
-
-```text
-0x0035
-```
-
-corresponding to:
+Wireshark identified `0x0035` as:
 
 ```text
 TLS_RSA_WITH_AES_256_CBC_SHA
 ```
 
-This cipher suite combines:
-
-```text
-RSA
-    Key exchange/authentication
-
-AES-256-CBC
-    Symmetric encryption
-
-SHA
-    Message authentication
-```
-
-The use of RSA key exchange is especially important for this analysis because the corresponding server private key was provided with the capture.
-
 <p align="center">
   <img src="screenshots/01-tls-handshake.png"/>
   <br/>
-  <em>Server Hello with SSL 3.0 0x0035</em>
+  <em>SSL 3.0 Server Hello selecting cipher suite 0x0035</em>
 </p>
 
----
+The part that mattered most for this project was `RSA`.
 
-### 3. Server Certificate Exchange
+This older TLS configuration uses RSA during key establishment, and the capture came with the matching server private key.
 
-During the handshake, the server sends its certificate to the client.
-
-The certificate contains the public key used by the client during RSA-based session establishment.
-
-Conceptually:
-
-```text
-Server
-  |
-  | Public certificate
-  v
-Client
-
-Client generates secret material
-  |
-  | Encrypts using server RSA public key
-  v
-Server
-
-Server decrypts using RSA private key
-```
-
-The supplied file:
-
-```text
-rsasnakeoil2.key
-```
-
-contains the matching RSA private key.
-
-Its PEM header is:
-
-```text
------BEGIN RSA PRIVATE KEY-----
-```
-
-and the key is:
-
-```text
-1024 bits
-```
-
-This allows Wireshark to reproduce cryptographic operations necessary to derive the historical session keys.
+That meant retrospective decryption might actually be possible.
 
 ---
 
-### 4. Client Key Exchange
+## What Was Visible Before Decryption
 
-The client subsequently sends a:
-
-```text
-Client Key Exchange
-```
-
-message.
-
-Under this RSA-based cipher suite, the client encrypts key-exchange material using the server's RSA public key.
-
-The server can decrypt that information with its private key.
-
-Both sides can then independently derive the symmetric keys used for the encrypted SSL session.
-
-This relationship is what makes retrospective decryption possible when the server's private RSA key is available.
-
----
-
-### 5. Change Cipher Spec
-
-After key establishment, the peers exchange:
-
-```text
-Change Cipher Spec
-```
-
-messages.
-
-This indicates that subsequent communication will use the negotiated encryption parameters.
-
-After this point, Wireshark begins displaying records as encrypted:
+After the handshake completed, the traffic changed to:
 
 ```text
 Application Data
 ```
 
-rather than immediately exposing HTTP requests and responses.
-
----
-
-### 6. Encrypted Application Data
-
-Without the RSA key configured, packets following the handshake contain SSL records such as:
-
-```text
-Content Type: Application Data
-Version: SSL 3.0
-Encrypted Application Data: ...
-```
-
-The raw bytes appear effectively random.
-
-For example, the client sends a large SSL Application Data record immediately after completing the handshake.
-
-Without decryption, an analyst can determine:
-
-```text
-Client IP
-Server IP
-Server port
-TLS version
-Cipher suite
-Packet timing
-Packet sizes
-Connection duration
-```
-
-but cannot directly determine the HTTP request contained inside the encrypted payload.
-
-This is the central security benefit provided by TLS.
-
 <p align="center">
   <img src="screenshots/02-encrypted-application-data.png"/>
   <br/>
-  <em>Encrypted Application Data</em>
+  <em>Encrypted SSL Application Data before loading the key</em>
 </p>
 
----
-
-## TLS Visibility Without Decryption
-
-The network observer can see:
+At this point I could still see things like:
 
 ```text
-127.0.0.1:38713 -> 127.0.0.1:443
-
-SSL/TLS handshake
-SSL version
+Endpoints
+Ports
+TLS version
 Cipher suite
-Certificate
-Application Data record lengths
+Certificate information
+Packet sizes
 Timing
 ```
 
-but the application-layer conversation remains hidden:
+but I couldn't see the actual HTTP requests.
 
-```text
-Encrypted Application Data
-        ↓
-       ???
-```
+The application data just appeared as encrypted bytes.
 
-The HTTP request itself is not readable from the ciphertext alone.
+That gave me a good baseline before trying the private key.
 
 ---
 
-### 7. RSA Private Key Loaded into Wireshark
+## Loading the RSA Private Key
 
-The supplied:
+The supplied key was:
 
 ```text
 rsasnakeoil2.key
 ```
 
-can be configured as an RSA private key in Wireshark.
+and contained a standard RSA private-key PEM header:
 
-In current Wireshark versions, this can typically be configured through the TLS protocol preferences / RSA Keys configuration.
+```text
+-----BEGIN RSA PRIVATE KEY-----
+```
 
-After the key is loaded and the capture is reprocessed, Wireshark can derive the session encryption keys for this historical RSA key-exchange session.
+I added it to Wireshark's TLS RSA-key configuration and reprocessed the capture.
 
-The same packet that previously appeared only as:
+Because this session used RSA key exchange, Wireshark could use the matching private key to recover the session secrets needed to decrypt the traffic.
+
+The same packets that previously showed only:
 
 ```text
 SSL Application Data
 ```
 
-can now be dissected further as:
+could now be dissected as:
 
 ```text
 HTTP
 ```
 
-<p align="center">
-  <img src="screenshots/02-encrypted-application-data.png"/>
-  <br/>
-  <em>Encrypted Application Data Now Visible As HTTP GET</em>
-</p>
+That was the point where the capture became much more interesting.
 
 ---
 
-### 8. HTTP Request Recovered
+## Recovering the HTTP Request
 
-One of the decrypted application records contains:
+After decryption, filtering for:
+
+```text
+http.request
+```
+
+revealed the HTTP activity that had previously been hidden.
+
+One of the recovered requests was:
 
 ```text
 GET / HTTP/1.1
-```
-
-The request includes HTTP headers such as:
-
-```text
 Host: localhost
 ```
-
-and browser information identifying an older Firefox/Linux client.
-
-This changes the analyst's visibility from:
-
-```text
-Encrypted Application Data
-```
-
-to:
-
-```text
-HTTP GET /
-```
-
-The network conversation can therefore now be analyzed at the application layer.
-
-This demonstrates that encryption does not destroy the underlying protocol data—it prevents observers without the necessary cryptographic material from reading it.
 
 <p align="center">
   <img src="screenshots/04-decrypted-resource.png"/>
   <br/>
-  <em>HTTP Requests Visible with Some Images Being Sent</em>
+  <em>HTTP requests visible after TLS decryption</em>
 </p>
 
----
+The difference was pretty dramatic.
 
-### 9. Additional HTTP Resources Recovered
-
-The decrypted traffic contains additional HTTP requests associated with loading the web page and its resources.
-
-One request retrieves:
-
-```text
-/icons/debian/openlogo-25.jpg
-```
-
-<p align="center">
-  <img src="recovered/apache_pb.png"/>
-  <br/>
-  <em>Recovered Image</em>
-</p>
-
-This demonstrates that Wireshark is not merely identifying the initial HTTP request.
-
-Once the TLS session is successfully decrypted, it can dissect multiple application-layer requests and responses transported through the encrypted connection.
-
-The logical protocol stack becomes:
-
-```text
-Ethernet
-   ↓
-IPv4
-   ↓
-TCP
-   ↓
-SSL/TLS
-   ↓
-HTTP
-```
-
-Without the private key, only the layers through SSL/TLS can be meaningfully inspected.
-
-With decryption, HTTP becomes visible as well.
-
----
-
-## Before and After Decryption
-
-### Before
+Before:
 
 ```text
 TCP/443
@@ -434,28 +175,7 @@ Application Data
 Encrypted bytes
 ```
 
-Visible information:
-
-```text
-Endpoints
-Ports
-Certificates
-Cipher suite
-Packet sizes
-Timing
-```
-
-Hidden information:
-
-```text
-HTTP methods
-Request paths
-HTTP headers
-Page contents
-Transferred resources
-```
-
-### After
+After loading the key:
 
 ```text
 TCP/443
@@ -469,155 +189,113 @@ HTTP
 GET / HTTP/1.1
 ```
 
-The underlying web activity becomes directly inspectable.
+Instead of just knowing that encrypted traffic existed, I could now see what the browser was actually requesting.
 
 ---
 
-## Why RSA Decryption Works Here
+## Recovering Additional Resources
 
-The negotiated cipher suite is:
+The decrypted session also contained requests for page resources.
+
+One example was:
+
+```text
+/icons/debian/openlogo-25.jpg
+```
+
+Wireshark could now parse these requests and responses as HTTP rather than treating them as opaque TLS records.
+
+<p align="center">
+  <img src="recovered/apache_pb.png"/>
+  <br/>
+  <em>Image recovered from the decrypted HTTP session</em>
+</p>
+
+This confirmed that decryption wasn't limited to a single request. Once the TLS session was successfully decrypted, the underlying web traffic could be analyzed normally.
+
+---
+
+## Why the RSA Key Worked Here
+
+The key detail was the negotiated cipher suite:
 
 ```text
 TLS_RSA_WITH_AES_256_CBC_SHA
 ```
 
-The important component is:
+With this older RSA-based key exchange, the server's long-term RSA key is involved in establishing the session secrets.
 
-```text
-RSA
-```
+Because the matching private key was available, Wireshark could use it to derive the encryption keys for the recorded session.
 
-The client uses the server's RSA public key during key establishment.
-
-Because the matching private key was supplied, Wireshark can recover the required secret information and derive the symmetric session keys.
-
-This enables retrospective decryption of the recorded session.
+That makes retrospective decryption possible for this particular capture.
 
 ---
 
-## Why This Does Not Work for Most Modern TLS Traffic
+## Why This Is Different from Modern TLS
 
-Modern TLS deployments generally use ephemeral key exchange mechanisms such as:
+This technique shouldn't be taken to mean that having a modern HTTPS server's private key automatically lets you decrypt old packet captures.
+
+Modern TLS commonly uses ephemeral key exchange such as:
 
 ```text
 ECDHE
 ```
 
-rather than static RSA key exchange.
+which provides forward secrecy.
 
-With ephemeral Diffie-Hellman key exchange, possession of the server's RSA private key does not provide the ephemeral session secrets required to decrypt previously captured traffic.
+In that setup, the server's long-term private key does not contain the ephemeral session secrets needed to decrypt previously recorded traffic.
 
-This property is called:
-
-```text
-Forward Secrecy
-```
-
-Therefore, the technique demonstrated by this historical capture should not be interpreted as meaning that possession of a modern HTTPS server's private certificate key automatically permits decryption of captured sessions.
-
-Modern TLS analysis commonly uses session-secret logging, such as a TLS key log file, when authorized plaintext visibility is required.
-
----
-
-## Two TLS Connections
-
-The capture contains two client TCP connections to the HTTPS server:
-
-```text
-Connection 1:
-127.0.0.1:38713 -> 127.0.0.1:443
-
-Connection 2:
-127.0.0.1:38714 -> 127.0.0.1:443
-```
-
-The second connection also exchanges SSL/TLS handshake and encrypted application data.
-
-Multiple HTTPS connections are normal browser behavior because clients may establish additional connections to retrieve page resources in parallel.
-
----
-
-## Indicators and Artifacts
-
-| Type                   | Value                           |
-| ---------------------- | ------------------------------- |
-| Client/Server Address  | `127.0.0.1`                     |
-| HTTPS Server Port      | TCP/443                         |
-| Client Port            | `38713`                         |
-| Additional Client Port | `38714`                         |
-| SSL/TLS Version        | SSL 3.0                         |
-| Cipher Suite           | `TLS_RSA_WITH_AES_256_CBC_SHA`  |
-| Cipher ID              | `0x0035`                        |
-| Encryption             | AES-256-CBC                     |
-| Key Exchange           | RSA                             |
-| Integrity              | SHA                             |
-| RSA Private Key Size   | 1024 bits                       |
-| Recovered Protocol     | HTTP                            |
-| Recovered Request      | `GET / HTTP/1.1`                |
-| Additional Resource    | `/icons/debian/openlogo-25.jpg` |
-
-These values are artifacts of an intentionally old SSL/TLS sample and should not be treated as representative of a secure modern TLS deployment.
-
----
-
-## Security Significance
-
-TLS prevents passive observers from directly reading application-layer network traffic.
-
-Without cryptographic secrets, this capture exposes connection metadata but hides HTTP request paths, headers, and transferred content.
-
-Once the appropriate RSA private key is available, however, this historical RSA-based session can be decrypted and the underlying HTTP reconstructed.
-
-This illustrates two important security concepts:
-
-1. Encryption significantly changes what network analysts can observe from packet captures.
-2. The security properties of TLS depend heavily on the negotiated cryptographic configuration.
-
-Modern forward-secret cipher suites were designed in part to prevent retrospective session decryption solely from compromise of a server's long-term private key.
+For modern authorized TLS analysis, a session key log file is usually a much more practical method.
 
 ---
 
 ## Useful Wireshark Filters
 
 ```text
-# HTTPS/TLS traffic
+# HTTPS traffic
 tcp.port == 443
 
-# TLS/SSL traffic
+# SSL/TLS traffic
 tls || ssl
 
 # TLS handshake traffic
 tls.handshake || ssl.handshake
 
-# HTTP visible after successful decryption
+# HTTP visible after decryption
 http
 
-# Initial HTTP request after decryption
+# HTTP requests after decryption
 http.request
 
-# Traffic on first client connection
+# First TLS connection
 tcp.port == 38713
 
-# Traffic on second client connection
+# Second TLS connection
 tcp.port == 38714
 ```
 
-Depending on the Wireshark version, this historical capture may be labeled under either `SSL` or `TLS`.
+Depending on the Wireshark version, this older capture may appear under either `SSL` or `TLS`.
 
-## Conclusion
+## Takeaway
 
-Analysis of the capture identified two encrypted SSL connections between local clients and an HTTPS server at `127.0.0.1:443`.
+The most useful part of this project was seeing the difference encryption makes during packet analysis.
 
-The server negotiated SSL 3.0 and cipher suite `0x0035`, corresponding to RSA key exchange with AES-256-CBC encryption and SHA integrity protection.
+Before loading the key, I could identify the TLS session, protocol version, cipher suite, certificate, and connection metadata, but the actual web activity was hidden.
 
-Without decryption, the HTTP portion of the communication appears only as encrypted SSL Application Data.
+After loading the matching RSA private key, Wireshark could decrypt the session and reveal the underlying HTTP requests and resources.
 
-The supplied 1024-bit RSA private key allows Wireshark to derive the necessary session keys for this historical RSA-based handshake. After decryption, previously hidden application traffic becomes visible, including an HTTP:
+Seeing:
+
+```text
+Application Data
+```
+
+turn into:
 
 ```text
 GET / HTTP/1.1
 ```
 
-request and requests for additional web resources.
+made the purpose of TLS much more concrete.
 
-The analysis demonstrates the difference between transport metadata and protected application content, while also illustrating why modern forward-secret TLS configurations cannot normally be decrypted retrospectively using only a server's long-term RSA private key.
+It also showed why the exact cryptographic configuration matters. This worked because the capture used an older RSA key-exchange cipher suite; modern forward-secret TLS sessions would not normally be decryptable later using only the server's private key.
