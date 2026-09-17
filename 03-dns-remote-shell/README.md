@@ -75,9 +75,9 @@ UDP destination port 53
 and contain valid DNS headers, questions, and responses.
 
 <p align="center">
-  <img src="screenshots/01-standard-syn-scan.png"/>
+  <img src="screenshots/01-dns-baseline.png"/>
   <br/>
-  <em>Standard SYN Scan</em>
+  <em>DNS Baselinen</em>
 </p>
 
 Useful filter:
@@ -150,6 +150,12 @@ exit
 ```
 
 and the TCP session terminates.
+
+<p align="center">
+  <img src="screenshots/02-tcp53-remote-shell.png"/>
+  <br/>
+  <em>TCP Port 53 (DNS) Remote Shell</em>
+</p>
 
 ### Key Finding
 
