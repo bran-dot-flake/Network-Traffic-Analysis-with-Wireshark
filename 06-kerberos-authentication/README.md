@@ -2,76 +2,43 @@
 
 ## Scenario
 
-A packet capture containing Kerberos authentication traffic from a Windows domain environment was analyzed to reconstruct the ticket-based authentication process.
+This capture contained Kerberos traffic from a Windows domain environment.
 
-The capture contains communication between a client and a Kerberos Key Distribution Center (KDC) over UDP port 88.
+I wanted to follow the authentication process from the client's first request through the point where it began requesting tickets for individual services.
 
-The traffic demonstrates:
-
-* Authentication Server requests and responses
-* Kerberos error handling
-* Ticket Granting Ticket acquisition
-* Ticket Granting Service requests
-* Service ticket issuance
-* Requests for HOST, CIFS, and LDAP services
-* Multiple domain principals using Kerberos
-
-A supplied Kerberos keytab can also be used to assist with decrypting portions of the Kerberos exchanges in Wireshark.
-
-## Objectives
-
-* Identify the Kerberos client and KDC
-* Distinguish AS and TGS exchanges
-* Identify Ticket Granting Ticket acquisition
-* Identify requested service principals
-* Examine Kerberos error handling
-* Understand the role of the TGT and service tickets
-* Use a supplied keytab to improve visibility into encrypted Kerberos data
+The traffic also came with a Kerberos keytab, which gave me a chance to see what additional information Wireshark could decrypt.
 
 ## Initial Triage
 
-| Item                | Finding          |
-| ------------------- | ---------------- |
-| Total Packets       | 32               |
-| Capture Duration    | ~74.03 seconds   |
-| Client              | `10.1.12.2`      |
-| Kerberos KDC        | `10.5.3.1`       |
-| Protocol            | Kerberos         |
-| Transport           | UDP              |
-| Server Port         | UDP/88           |
-| Realm               | `DENYDC.COM`     |
-| Observed Principals | `des`, `u5`      |
-| Service Types       | HOST, CIFS, LDAP |
+| Item               | Finding          |
+| ------------------ | ---------------- |
+| Client             | `10.1.12.2`      |
+| KDC                | `10.5.3.1`       |
+| Protocol           | Kerberos         |
+| Transport          | UDP/88           |
+| Realm              | `DENYDC.COM`     |
+| Principals         | `des`, `u5`      |
+| Services Requested | HOST, CIFS, LDAP |
 
-All packets in the capture are Kerberos exchanges between:
+All of the traffic in the capture was between:
 
 ```text
 10.1.12.2 <-> 10.5.3.1
 ```
 
-The client sends requests to:
-
-```text
-10.5.3.1:88/UDP
-```
-
-which identifies `10.5.3.1` as the Kerberos KDC.
-
----
-
-## Analysis
-
-### 1. Kerberos Authentication Traffic Identified
-
-Filtering for:
+A simple filter:
 
 ```text
 kerberos
 ```
 
-isolates the entire capture.
+isolated the entire capture.
 
-The traffic consists primarily of four Kerberos message types:
+---
+
+## Getting Oriented
+
+The first thing I noticed was that most of the traffic fell into four message types:
 
 ```text
 AS-REQ
@@ -80,45 +47,26 @@ TGS-REQ
 TGS-REP
 ```
 
-These represent two major stages of Kerberos authentication.
+<p align="center">
+  <img src="screenshots/01-kerberos-overview.png"/>
+  <br/>
+  <em>Kerberos authentication traffic in the capture</em>
+</p>
 
-The first stage obtains a:
-
-```text
-Ticket Granting Ticket (TGT)
-```
-
-while the second uses the TGT to request:
+The easiest way for me to think about the sequence was:
 
 ```text
-service tickets
+AS exchange  -> get a TGT
+TGS exchange -> use the TGT to request service tickets
 ```
 
-for individual network services.
-
-The high-level process is:
-
-```text
-Client                         KDC
-  |                             |
-  | -------- AS-REQ ----------> |
-  | <------- AS-REP ----------- |
-  |                             |
-  | -------- TGS-REQ ---------> |
-  | <------- TGS-REP ---------- |
-```
+So I started with the first AS request and followed the session from there.
 
 ---
 
-### 2. Initial AS-REQ
+## Initial Authentication Attempt
 
-The first packet is an:
-
-```text
-AS-REQ
-```
-
-from:
+The first packet was an `AS-REQ` from:
 
 ```text
 10.1.12.2 -> 10.5.3.1
@@ -130,190 +78,139 @@ for the principal:
 des
 ```
 
-within the Kerberos realm:
+in the `DENYDC.COM` realm.
 
-```text
-DENYDC
-```
-
-The request ultimately seeks a ticket for:
-
-```text
-krbtgt/DENYDC
-```
-
-The `krbtgt` account is the Kerberos Ticket Granting Service account.
-
-A successful AS exchange provides the client with a Ticket Granting Ticket, which can later be presented when requesting access to individual services.
-
-Useful filter:
-
-```text
-kerberos.msg_type == 10
-```
-
-for AS-REQ messages.
-
----
-
-### 3. Kerberos Error Response
-
-The KDC does not immediately return an AS-REP to the first request.
-
-Instead, the second packet is:
-
-```text
-KRB-ERROR
-```
-
-with Kerberos error code:
-
-```text
-14
-```
-
-which corresponds to:
-
-```text
-KDC_ERR_ETYPE_NOSUPP
-```
-
-This indicates that the KDC does not support one or more of the encryption types proposed in the initial request.
-
-The client subsequently sends another AS-REQ with a compatible encryption configuration.
-
-This demonstrates that Kerberos authentication may involve negotiation or error handling before a ticket is successfully issued.
-
-Useful filter:
-
-```text
-kerberos.msg_type == 30
-```
-
----
-
-### 4. Ticket Granting Ticket Obtained
-
-The client sends a second:
-
-```text
-AS-REQ
-```
-
-and the KDC responds with:
-
-```text
-AS-REP
-```
-
-The response identifies:
-
-```text
-Realm: DENYDC.COM
-Client Principal: des
-```
-
-and contains a ticket issued for:
+The request was ultimately asking for a ticket to:
 
 ```text
 krbtgt/DENYDC.COM
 ```
 
-This is the Ticket Granting Ticket.
+which is the Ticket Granting Service account.
 
-The TGT allows the authenticated principal to request tickets for individual services without repeatedly transmitting or validating the user's long-term credential.
-
-The flow is therefore:
+Instead of immediately returning a ticket, the KDC responded with:
 
 ```text
-des
- ↓
-AS-REQ
- ↓
-KDC
- ↓
-AS-REP
- ↓
-TGT for krbtgt/DENYDC.COM
+KRB-ERROR
+KDC_ERR_ETYPE_NOSUPP
 ```
 
-Useful filter for AS responses:
+The error code was:
 
 ```text
-kerberos.msg_type == 11
+14
 ```
+
+This told me the initial request included an encryption type the KDC didn't support.
+
+The client then tried again with another `AS-REQ`.
 
 ---
 
-### 5. Service Ticket Request
+## TGT Successfully Issued
 
-After acquiring a TGT, the client begins sending:
+The second authentication attempt succeeded.
+
+The KDC returned an:
 
 ```text
-TGS-REQ
+AS-REP
 ```
 
-messages.
+for:
 
-A TGS request contains the previously obtained TGT and asks the KDC for permission to access a particular service.
+```text
+Client: des
+Realm: DENYDC.COM
+```
 
-The KDC responds with:
+and the ticket inside the response was for:
+
+```text
+krbtgt/DENYDC.COM
+```
+
+<p align="center">
+  <img src="screenshots/02-as-exchange.png"/>
+  <br/>
+  <em>Successful AS exchange resulting in a Ticket Granting Ticket</em>
+</p>
+
+At this point, the client had its Ticket Granting Ticket.
+
+The sequence so far was:
+
+```text
+des
+ |
+ | AS-REQ
+ v
+KDC
+ |
+ | KRB-ERROR
+ v
+des
+ |
+ | AS-REQ
+ v
+KDC
+ |
+ | AS-REP
+ v
+TGT
+```
+
+That made the later packets much easier to understand.
+
+---
+
+## Requesting Service Tickets
+
+After receiving the TGT, the client began sending `TGS-REQ` messages.
+
+Instead of authenticating from scratch again, the client used the TGT to request tickets for individual services.
+
+The KDC returned each one in a:
 
 ```text
 TGS-REP
 ```
 
-containing a service ticket.
-
-Useful filters:
-
-```text
-kerberos.msg_type == 12
-```
-
-for TGS-REQ and:
-
-```text
-kerberos.msg_type == 13
-```
-
-for TGS-REP.
+This was where the capture started showing what resources the client actually wanted to access.
 
 ---
 
-### 6. HOST Service Ticket
+## HOST Ticket
 
-One of the first service tickets issued is for:
+One request was for:
 
 ```text
 host/xp1.denydc.com
 ```
 
-The exchange follows:
+The flow looked like:
 
 ```text
-10.1.12.2
-    |
-    | TGS-REQ
-    v
-10.5.3.1
-    |
-    | TGS-REP
-    v
-
-Service:
+TGT
+ |
+ | TGS-REQ
+ v
+KDC
+ |
+ | TGS-REP
+ v
 host/xp1.denydc.com
 ```
 
-The `HOST` service principal is commonly associated with general Windows host authentication and several Windows services.
+The important thing here was that Kerberos wasn't simply issuing a generic "access this computer" ticket.
 
-This demonstrates that Kerberos tickets are issued for specific service principals rather than simply granting unrestricted access to a remote system.
+The ticket was tied to a specific service principal.
 
 ---
 
-### 7. CIFS Service Tickets
+## CIFS Tickets
 
-Several ticket exchanges involve:
+I also found several requests for CIFS:
 
 ```text
 cifs/VPC-W2K3ENT
@@ -325,41 +222,33 @@ and:
 cifs/vpc-w2k3ent.denydc.com
 ```
 
-CIFS is associated with Windows SMB file sharing.
+<p align="center">
+  <img src="screenshots/03-tgs-cifs.png"/>
+  <br/>
+  <em>CIFS service ticket returned by the KDC</em>
+</p>
 
-A ticket for:
+Since CIFS is used by SMB, these tickets would allow the client to authenticate to the server's file-sharing service using Kerberos.
 
-```text
-cifs/server
-```
-
-allows the requesting principal to authenticate to the server's SMB service using Kerberos.
-
-The process can be summarized as:
+The flow was essentially:
 
 ```text
 TGT
- ↓
-TGS-REQ
- ↓
-Request CIFS ticket
- ↓
+ |
+ | Request CIFS service ticket
+ v
 KDC
- ↓
-TGS-REP
- ↓
-CIFS service ticket
+ |
+ | TGS-REP
+ v
+CIFS ticket
 ```
-
-This ticket could subsequently be presented to the SMB server rather than sending a password across the network.
 
 ---
 
-### 8. LDAP Service Tickets
+## LDAP Tickets
 
-The capture also contains service-ticket requests for LDAP.
-
-Observed service principals include:
+The capture also contained requests for LDAP services:
 
 ```text
 LDAP/vpc-w2k3ent.denyDC.com
@@ -371,84 +260,85 @@ and:
 ldap/vpc-w2k3ent.denyDC.com/denyDC.com
 ```
 
-LDAP is heavily used within Active Directory for directory queries and domain operations.
+That fit with normal Active Directory activity, since LDAP is heavily used for directory queries and domain operations.
 
-Kerberos tickets issued for LDAP therefore allow authenticated clients to access Active Directory directory services.
+At this point the pattern became clear: one successful authentication could lead to several service-ticket requests without the user having to authenticate again each time.
 
-This is especially relevant during Windows domain authentication because a workstation may request multiple tickets during a single logon or domain interaction.
-
----
-
-### 9. Multiple Services Requested
-
-The capture illustrates an important aspect of Kerberos:
-
-> A single authenticated principal may obtain one TGT and then use it to request multiple individual service tickets.
-
-Observed services include:
+The services I observed were:
 
 | Service  | Purpose                             |
 | -------- | ----------------------------------- |
 | `krbtgt` | Ticket Granting Ticket              |
 | `host`   | Windows host services               |
-| `cifs`   | SMB / Windows file sharing          |
+| `cifs`   | SMB / file sharing                  |
 | `ldap`   | Active Directory directory services |
-
-The network may therefore contain many TGS requests even though the user authenticated only once.
 
 ---
 
-### 10. Additional Principal: u5
+## Another Principal Appears
 
-Later in the capture, another AS exchange occurs for:
+Later in the capture, a second principal appeared:
 
 ```text
 u5@DENYDC.COM
 ```
 
-The KDC returns an:
+The KDC returned an `AS-REP` for this account as well.
 
-```text
-AS-REP
-```
-
-for this principal.
-
-Additional TGS exchanges then follow, again requesting access to services including:
+More TGS requests followed for services such as:
 
 ```text
 host
-LDAP
 ldap
 cifs
-krbtgt
 ```
 
-This demonstrates multiple Kerberos principals using the same KDC infrastructure.
+This showed that the capture wasn't just one user's authentication session. Multiple principals were using the same KDC to obtain their own tickets.
 
 ---
 
-## Kerberos Message Types
+## Using the Keytab
 
-| Message   | Number | Purpose                            |
-| --------- | -----: | ---------------------------------- |
-| AS-REQ    |     10 | Request initial authentication/TGT |
-| AS-REP    |     11 | KDC returns TGT                    |
-| TGS-REQ   |     12 | Request ticket for a service       |
-| TGS-REP   |     13 | KDC returns service ticket         |
-| KRB-ERROR |     30 | Kerberos error response            |
+The capture also came with a Kerberos keytab containing entries for:
 
-These message types provide a straightforward way to classify Kerberos activity in packet captures.
+```text
+des@DENYDC.COM
+u5@DENYDC.COM
+```
+
+The two entries used different encryption types:
+
+```text
+des -> DES-CBC-MD5
+u5  -> RC4-HMAC
+```
+
+After loading the keytab into Wireshark, I could inspect decrypted Kerberos structures where the supplied keys matched the traffic.
+
+<p align="center">
+  <img src="screenshots/04-decrypted-keytab.png"/>
+  <br/>
+  <em>Kerberos data decrypted using the supplied keytab</em>
+</p>
+
+This exposed additional fields inside the encrypted portions of the ticket exchange, including things like:
+
+```text
+key
+last-req
+nonce
+flags
+```
+
+That was useful because it showed the difference between what is visible from normal Kerberos dissection and what becomes available once the relevant key material is provided.
 
 ---
 
 ## Authentication Flow
 
-The authentication sequence observed in the capture can be generalized as:
+Putting the main sequence together:
 
 ```text
-               Kerberos Authentication
-
 Client                                  KDC
   |                                      |
   | ------------ AS-REQ --------------> |
@@ -468,98 +358,7 @@ Client                                  KDC
   |                                      |
 ```
 
-The client can repeat the TGS portion of the exchange for each service it needs to access.
-
----
-
-## Keytab Analysis
-
-The supplied keytab contains two Kerberos principals:
-
-```text
-des@DENYDC.COM
-u5@DENYDC.COM
-```
-
-The key entries use different encryption types.
-
-The `des` entry uses Kerberos encryption type:
-
-```text
-3
-```
-
-corresponding to DES-CBC-MD5.
-
-The `u5` entry uses encryption type:
-
-```text
-23
-```
-
-corresponding to RC4-HMAC.
-
-When configured in Wireshark, the keytab can allow the dissector to decrypt Kerberos structures for which the corresponding key is available.
-
-This can provide visibility beyond the information that is transmitted in cleartext.
-
----
-
-## Indicators and Artifacts
-
-| Type                   | Value                         |
-| ---------------------- | ----------------------------- |
-| Kerberos Client        | `10.1.12.2`                   |
-| KDC                    | `10.5.3.1`                    |
-| KDC Port               | UDP/88                        |
-| Realm                  | `DENYDC.COM`                  |
-| Principal              | `des`                         |
-| Principal              | `u5`                          |
-| TGT Service            | `krbtgt/DENYDC.COM`           |
-| HOST Service           | `host/xp1.denydc.com`         |
-| CIFS Service           | `cifs/VPC-W2K3ENT`            |
-| CIFS Service           | `cifs/vpc-w2k3ent.denydc.com` |
-| LDAP Service           | `LDAP/vpc-w2k3ent.denyDC.com` |
-| Initial Kerberos Error | `KDC_ERR_ETYPE_NOSUPP`        |
-
-These values are artifacts from the controlled sample environment rather than indicators of compromise.
-
----
-
-## Security Significance
-
-Kerberos is central to authentication in Active Directory environments.
-
-Understanding normal Kerberos exchanges is important because many common Active Directory attack techniques manipulate the same ticket infrastructure.
-
-Examples include:
-
-```text
-Kerberoasting
-AS-REP roasting
-Pass-the-Ticket
-Golden Ticket attacks
-Silver Ticket attacks
-Ticket theft
-Delegation abuse
-```
-
-However, the presence of AS-REQ, AS-REP, TGS-REQ, or TGS-REP traffic alone does not indicate malicious behavior.
-
-These messages occur continuously during legitimate Windows domain activity.
-
-Analysts must instead examine factors such as:
-
-* Which principal requested the ticket
-* Which SPN was requested
-* Encryption types
-* Repeated authentication failures
-* Unusual ticket lifetimes
-* Unexpected service access
-* Abnormally high volumes of TGS requests
-* Relationships between users and requested services
-
-This capture serves as a useful baseline for understanding normal ticket acquisition before investigating Kerberos attacks.
+The TGS portion can repeat for every service the client needs.
 
 ---
 
@@ -592,23 +391,14 @@ ip.addr == 10.1.12.2 &&
 ip.addr == 10.5.3.1
 ```
 
-## Conclusion
+## Takeaway
 
-Analysis of the capture identified Kerberos authentication between client `10.1.12.2` and KDC `10.5.3.1` over UDP port 88.
+The most useful part of this capture was seeing Kerberos as a sequence rather than just a collection of ticket packets.
 
-The initial principal `des` first sent an AS-REQ that received a Kerberos encryption-type error. A subsequent AS request succeeded, and the KDC returned an AS-REP containing a Ticket Granting Ticket for `krbtgt/DENYDC.COM`.
+The client first tried to authenticate and received an encryption-type error. A second request succeeded and returned a TGT.
 
-The TGT was then used in multiple TGS exchanges to obtain service tickets for resources including:
+From there, that TGT was reused to request tickets for individual services such as HOST, CIFS, and LDAP.
 
-```text
-host/xp1.denydc.com
-cifs/VPC-W2K3ENT
-LDAP/vpc-w2k3ent.denyDC.com
-cifs/vpc-w2k3ent.denydc.com
-```
+Loading the supplied keytab also showed how much more detail becomes available when Wireshark has the right key material.
 
-Later traffic also showed authentication activity involving the `u5` principal.
-
-The capture demonstrates the two fundamental stages of Kerberos authentication: initial TGT acquisition through the Authentication Service and subsequent service-ticket acquisition through the Ticket Granting Service.
-
-Understanding this normal authentication sequence provides an important baseline for investigating Kerberos-related attacks in Active Directory environments.
+Working through the exchange made the relationship between TGTs and service tickets much clearer, and it gave me a better baseline for what normal Kerberos activity looks like before trying to identify things like Kerberoasting, Pass-the-Ticket, or other ticket-based attacks.
