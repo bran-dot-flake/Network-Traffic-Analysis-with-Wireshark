@@ -35,6 +35,12 @@ Additional HTTP traffic occurs between the client and external addresses, includ
 
 ### 1. Primary Hosts Identified
 
+<p align="center">
+  <img src="screenshots/01-ipv4-conversations.png"/>
+  <br/>
+  <em>Ipv4 Conversations</em>
+</p>
+
 Reviewing IPv4 conversations showed significant communication between:
 
 ```text
@@ -65,6 +71,12 @@ tcp.port == 80
 ---
 
 ### 2. HTTP Requests Examined
+
+<p align="center">
+  <img src="screenshots/02-http-requests.png"/>
+  <br/>
+  <em>HTTP Requests</em>
+</p>
 
 Filtering for HTTP requests:
 
@@ -108,6 +120,12 @@ This demonstrates that unencrypted HTTP exposes not only requested resources but
 ---
 
 ### 3. JPEG Transfers Identified
+
+<p align="center">
+  <img src="screenshots/03-fullsize-http-stream.png"/>
+  <br/>
+  <em>Fullsize HTTP Stream</em>
+</p>
 
 HTTP responses from `10.1.1.1` contained the MIME type:
 
@@ -160,6 +178,12 @@ This indicates that the client first accessed a smaller image and later requeste
 
 ### 4. HTTP Session Reconstruction
 
+<p align="center">
+  <img src="screenshots/04-export-http-objects.png"/>
+  <br/>
+  <em>Export HTTP Objects</em>
+</p>
+
 The full-size image request can be examined by following its TCP stream.
 
 The client request contains:
@@ -208,6 +232,12 @@ DSC07859.JPG
 The full-size `DSC07858.JPG` can also be reconstructed from the HTTP session.
 
 Successful recovery of the image demonstrates that an observer with access to unencrypted network traffic may be able to recover complete files rather than merely viewing packet metadata.
+
+<p align="center">
+  <img src="recovered/DSC07858(1).JPG"/>
+  <br/>
+  <em>Recovered DSC07858 Image</em>
+</p>
 
 ## Indicators and Artifacts
 
