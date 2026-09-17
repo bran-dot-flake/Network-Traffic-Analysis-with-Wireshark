@@ -2,61 +2,50 @@
 
 ## Scenario
 
-A packet capture containing web browsing traffic was analyzed to identify the primary communicating hosts, examine HTTP activity, and determine whether transferred files could be recovered from the network traffic.
+This capture contained regular web browsing traffic over HTTP.
 
-Because the web traffic uses unencrypted HTTP rather than HTTPS, application-layer information such as requested URLs, HTTP headers, and transferred files is visible directly within the packet capture.
-
-## Objectives
-
-* Identify the primary client and web server
-* Examine HTTP requests and responses
-* Identify image files transferred over the network
-* Reconstruct an HTTP session
-* Recover transferred JPEG files from the packet capture
-* Demonstrate the security implications of unencrypted HTTP traffic
+Since the traffic wasn't encrypted, I wanted to see how much of the user's activity I could reconstruct directly from the packet capture and whether any transferred files could be recovered.
 
 ## Initial Triage
 
-| Item                 | Finding              |
-| -------------------- | -------------------- |
-| Total Packets        | 483                  |
-| Capture Duration     | ~11.38 seconds       |
-| Primary Client       | `10.1.1.101`         |
-| Primary Local Server | `10.1.1.1`           |
-| Application Protocol | HTTP                 |
-| Server Port          | TCP/80               |
-| Primary Content      | HTML and JPEG images |
+| Item         | Finding              |
+| ------------ | -------------------- |
+| Client       | `10.1.1.101`         |
+| Web Server   | `10.1.1.1`           |
+| Protocol     | HTTP                 |
+| Server Port  | TCP/80               |
+| Main Content | HTML and JPEG images |
 
-The majority of the capture consists of communication between `10.1.1.101` and `10.1.1.1`.
-
-Additional HTTP traffic occurs between the client and external addresses, including `209.225.0.6` and `209.225.11.237`. This traffic is associated with Opera browser services and advertising infrastructure and was not the primary focus of the investigation.
-
-## Analysis
-
-### 1. Primary Hosts Identified
-
-<p align="center">
-  <img src="screenshots/01-ipv4-conversations.png"/>
-  <br/>
-  <em>Ipv4 Conversations</em>
-</p>
-
-Reviewing IPv4 conversations showed significant communication between:
+Most of the interesting traffic was between:
 
 ```text
 10.1.1.101 <-> 10.1.1.1
 ```
 
-Inspection of the HTTP traffic established the roles of the systems:
+There was also some unrelated HTTP traffic to external addresses, but I kept the investigation focused on the local client and server.
+
+---
+
+## Identifying the Main HTTP Session
+
+I started by checking the IPv4 conversations and found a large amount of traffic between `10.1.1.101` and `10.1.1.1`.
+
+<p align="center">
+  <img src="screenshots/01-ipv4-conversations.png"/>
+  <br/>
+  <em>IPv4 conversations in the capture</em>
+</p>
+
+Looking at the HTTP traffic made the roles clear:
 
 ```text
 10.1.1.101 = HTTP client
-10.1.1.1   = HTTP web server
+10.1.1.1   = HTTP server
 ```
 
-The client initiated connections to TCP port 80 and requested resources from the server.
+The client was connecting to TCP/80 and requesting resources from the server.
 
-Useful Wireshark filters:
+Useful filters:
 
 ```text
 http
@@ -70,100 +59,76 @@ tcp.port == 80
 
 ---
 
-### 2. HTTP Requests Examined
+## Looking at the HTTP Requests
 
-<p align="center">
-  <img src="screenshots/02-http-requests.png"/>
-  <br/>
-  <em>HTTP Requests</em>
-</p>
-
-Filtering for HTTP requests:
+Filtering for:
 
 ```text
 http.request
 ```
 
-revealed normal web browsing activity.
+showed exactly what the browser was requesting.
 
-Examples include:
+<p align="center">
+  <img src="screenshots/02-http-requests.png"/>
+  <br/>
+  <em>HTTP GET requests from the client</em>
+</p>
+
+Some of the requests included:
 
 ```text
 GET / HTTP/1.1
-
 GET /Websidan/index.html HTTP/1.1
-
 GET /Websidan/images/bg2.jpg HTTP/1.1
-
 GET /Websidan/images/sydney.jpg HTTP/1.1
 ```
 
-Later requests referenced photographs associated with a SeaWorld directory:
+Later, the client requested several photographs:
 
 ```text
 GET /Websidan/2004-07-SeaWorld/320/DSC07858.JPG HTTP/1.1
-
 GET /Websidan/2004-07-SeaWorld/320/DSC07859.JPG HTTP/1.1
-
 GET /Websidan/2004-07-SeaWorld/fullsize/DSC07858.JPG HTTP/1.1
 ```
 
-The HTTP headers also reveal information about the client browser:
+The request headers also exposed information about the browser:
 
 ```text
 User-Agent: Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0) Opera 7.11 [en]
 Host: 10.1.1.1
 ```
 
-This demonstrates that unencrypted HTTP exposes not only requested resources but also information about the client software.
+So before even recovering any files, the capture was already revealing the pages being visited, requested file names, and client software.
 
 ---
 
-### 3. JPEG Transfers Identified
+## Finding the Image Transfers
 
-<p align="center">
-  <img src="screenshots/03-fullsize-http-stream.png"/>
-  <br/>
-  <em>Fullsize HTTP Stream</em>
-</p>
-
-HTTP responses from `10.1.1.1` contained the MIME type:
-
-```text
-Content-Type: image/jpeg
-```
-
-These responses can be isolated with:
+I then filtered for HTTP responses containing JPEG images:
 
 ```text
 http.content_type == "image/jpeg"
 ```
 
-Several JPEG files were transferred during the capture.
+Several image transfers appeared.
 
 Examples included:
 
 ```text
 /Websidan/images/bg2.jpg
-Content-Length: 8281
-
 /Websidan/images/sydney.jpg
-Content-Length: 9045
-
 /Websidan/2004-07-SeaWorld/320/DSC07858.JPG
-Content-Length: 8963
-
 /Websidan/2004-07-SeaWorld/320/DSC07859.JPG
-Content-Length: 10730
 ```
 
-A significantly larger image was subsequently requested:
+One request stood out because it was much larger:
 
 ```text
 /Websidan/2004-07-SeaWorld/fullsize/DSC07858.JPG
 ```
 
-The server responded:
+The server response showed:
 
 ```text
 HTTP/1.1 200 OK
@@ -172,28 +137,28 @@ Content-Length: 191515
 Content-Type: image/jpeg
 ```
 
-This indicates that the client first accessed a smaller image and later requested a full-size version of the same photograph.
+<p align="center">
+  <img src="screenshots/03-fullsize-http-stream.png"/>
+  <br/>
+  <em>Full-size JPEG transferred over HTTP</em>
+</p>
+
+It looked like the user had first loaded a smaller version of the image and then opened the full-size copy.
 
 ---
 
-### 4. HTTP Session Reconstruction
+## Following the HTTP Session
 
-<p align="center">
-  <img src="screenshots/04-export-http-objects.png"/>
-  <br/>
-  <em>Export HTTP Objects</em>
-</p>
+I followed the TCP stream associated with the full-size image.
 
-The full-size image request can be examined by following its TCP stream.
-
-The client request contains:
+The client requested:
 
 ```text
 GET /Websidan/2004-07-SeaWorld/fullsize/DSC07858.JPG HTTP/1.1
 Host: 10.1.1.1
 ```
 
-The corresponding server response contains:
+and the server responded with:
 
 ```text
 HTTP/1.1 200 OK
@@ -202,25 +167,31 @@ Content-Length: 191515
 Content-Type: image/jpeg
 ```
 
-Wireshark reconstructs the application-layer conversation from the individual TCP segments, allowing the original HTTP exchange to be viewed as a continuous stream.
+This was a useful example of how Wireshark can piece individual TCP packets back together into the original application-layer conversation.
 
-This demonstrates how packet analysis can reconstruct higher-level user activity from network traffic.
+Instead of seeing disconnected packets, I could see the request for the file followed by the server returning the image data.
 
 ---
 
-### 5. HTTP Object Recovery
+## Recovering the Image
 
-Because the image content was transmitted through unencrypted HTTP, Wireshark can reconstruct the transferred files.
+The final step was seeing whether the file could actually be reconstructed.
 
-Using:
+Wireshark provides:
 
 ```text
 File -> Export Objects -> HTTP
 ```
 
-displays the HTTP objects identified in the capture.
+which listed the objects transferred during the session.
 
-JPEG files such as the following can be exported:
+<p align="center">
+  <img src="screenshots/04-export-http-objects.png"/>
+  <br/>
+  <em>HTTP objects available for export</em>
+</p>
+
+From there, I was able to export files including:
 
 ```text
 bg2.jpg
@@ -229,77 +200,67 @@ DSC07858.JPG
 DSC07859.JPG
 ```
 
-The full-size `DSC07858.JPG` can also be reconstructed from the HTTP session.
-
-Successful recovery of the image demonstrates that an observer with access to unencrypted network traffic may be able to recover complete files rather than merely viewing packet metadata.
+Most importantly, the full-size version of `DSC07858.JPG` could be recovered successfully.
 
 <p align="center">
   <img src="recovered/DSC07858(1).JPG"/>
   <br/>
-  <em>Recovered DSC07858 Image</em>
+  <em>Recovered DSC07858 image</em>
 </p>
 
-## Indicators and Artifacts
+That was the most interesting part of the capture for me. I wasn't just able to identify that an image had been transferred — I could reconstruct the actual file that the user viewed.
 
-| Type                | Value                         |
-| ------------------- | ----------------------------- |
-| Client IP           | `10.1.1.101`                  |
-| Web Server          | `10.1.1.1`                    |
-| Protocol            | HTTP                          |
-| Server Port         | TCP/80                        |
-| Web Server Software | Apache/2.0.40 (Red Hat Linux) |
-| Browser             | Opera 7.11                    |
-| Image               | `DSC07858.JPG`                |
-| Full Image Size     | 191,515 bytes                 |
-| MIME Type           | `image/jpeg`                  |
+---
 
-These values represent artifacts observed during the analysis rather than malicious indicators of compromise.
+## Artifacts Observed
 
-## Security Significance
+| Type            | Value          |
+| --------------- | -------------- |
+| Client          | `10.1.1.101`   |
+| Web Server      | `10.1.1.1`     |
+| Protocol        | HTTP           |
+| Server Port     | TCP/80         |
+| Server Software | Apache/2.0.40  |
+| Server OS       | Red Hat Linux  |
+| Browser         | Opera 7.11     |
+| Recovered Image | `DSC07858.JPG` |
+| Image Size      | 191,515 bytes  |
+| MIME Type       | `image/jpeg`   |
 
-The capture demonstrates one of the primary weaknesses of unencrypted HTTP.
+These are artifacts from the sample capture rather than indicators of malicious activity.
 
-An observer with access to the network traffic can identify:
-
-* Source and destination systems
-* Requested URLs and file names
-* Browser and client information
-* HTTP request and response headers
-* Transferred files
-* Web content viewed by the client
-
-In this capture, complete JPEG images can be reconstructed directly from the network traffic.
-
-HTTPS mitigates this exposure by encrypting application-layer communication between the client and server. Although some connection metadata may remain observable, the HTTP request paths and transferred image contents would normally not be readable without access to the appropriate encryption keys.
+---
 
 ## Useful Wireshark Filters
 
 ```text
-# Display all HTTP traffic
+# All HTTP traffic
 http
 
-# Display HTTP requests
+# HTTP requests
 http.request
 
-# Display JPEG HTTP responses
+# JPEG responses
 http.content_type == "image/jpeg"
 
-# Traffic involving the client
+# Client traffic
 ip.addr == 10.1.1.101
 
-# Traffic involving the local server
+# Server traffic
 ip.addr == 10.1.1.1
 
-# HTTP traffic between the primary client and server
-ip.addr == 10.1.1.101 && ip.addr == 10.1.1.1 && tcp.port == 80
+# HTTP traffic between the client and server
+ip.addr == 10.1.1.101 &&
+ip.addr == 10.1.1.1 &&
+tcp.port == 80
 ```
 
-## Conclusion
+## Takeaway
 
-Analysis of the packet capture identified `10.1.1.101` as a client browsing an HTTP web server at `10.1.1.1`.
+The biggest thing this capture showed me was how much information plain HTTP exposes.
 
-The session included HTML pages and multiple JPEG images transferred over TCP port 80. Because HTTP provided no encryption, Wireshark could expose requested file paths, HTTP headers, browser information, and the contents of transferred files.
+I could see the exact resources the client requested, identify the browser and server software, follow the HTTP conversation, and ultimately recover the image being transferred.
 
-The investigation culminated in reconstruction and recovery of JPEG files from the packet capture, including a 191,515-byte full-size copy of `DSC07858.JPG`.
+The recovered JPEG made the risk much more concrete. An observer with access to the traffic wouldn't just know that someone visited a page, they could potentially reconstruct the content being viewed.
 
-This analysis demonstrates how packet captures can be used to reconstruct application-layer activity and illustrates why sensitive web traffic should be protected using encrypted protocols such as HTTPS.
+With HTTPS, the application-layer contents of this session would normally be encrypted, preventing this kind of direct inspection and file recovery.
