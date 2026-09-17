@@ -1,5 +1,16 @@
 # Network Traffic Analysis with Wireshark
 
+![Status](https://img.shields.io/badge/Project-Complete-brightgreen)
+![Wireshark](https://img.shields.io/badge/Wireshark-Network%20Analysis-1679A7?logo=wireshark\&logoColor=white)
+![Protocols](https://img.shields.io/badge/Protocols-HTTP%20%7C%20SMB%20%7C%20Kerberos%20%7C%20TLS-555555)
+![Focus](https://img.shields.io/badge/Focus-Packet%20Analysis-orange)
+
+*A collection of Wireshark investigations focused on packet analysis, protocol behavior, network reconnaissance, authentication traffic, and encrypted communications.*
+
+<sub>by: Brandon Chaney</sub>
+
+---
+
 This repository contains a collection of Wireshark investigations I worked through to practice packet analysis and get more comfortable understanding what network activity actually looks like on the wire.
 
 The cases cover things like HTTP traffic, port scanning, malformed fragmentation, SMB and Kerberos authentication, remote-shell traffic, and TLS decryption.
