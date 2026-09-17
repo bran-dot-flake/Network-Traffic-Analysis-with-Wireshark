@@ -96,6 +96,12 @@ Source Port: 31915
 Destination Port: 20197
 ```
 
+<p align="center">
+  <img src="screenshots/01-first-fragment.png"/>
+  <br/>
+  <em>First Fragment</em>
+</p>
+
 ---
 
 ### 2. Second Fragment Examined
@@ -135,6 +141,12 @@ The second fragment therefore represents payload bytes:
 ```text
 24 - 27
 ```
+
+<p align="center">
+  <img src="screenshots/02-overlapping-fragment.png"/>
+  <br/>
+  <em>Second Fragment</em>
+</p>
 
 ---
 
