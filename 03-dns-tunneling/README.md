@@ -74,6 +74,12 @@ UDP destination port 53
 
 and contain valid DNS headers, questions, and responses.
 
+<p align="center">
+  <img src="screenshots/01-standard-syn-scan.png"/>
+  <br/>
+  <em>Standard SYN Scan</em>
+</p>
+
 Useful filter:
 
 ```text
