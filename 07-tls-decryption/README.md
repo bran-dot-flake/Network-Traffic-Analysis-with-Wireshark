@@ -142,6 +142,12 @@ SHA
 
 The use of RSA key exchange is especially important for this analysis because the corresponding server private key was provided with the capture.
 
+<p align="center">
+  <img src="screenshots/01-tls-handshake.png"/>
+  <br/>
+  <em>Server Hello with SSL 3.0 0x0035</em>
+</p>
+
 ---
 
 ### 3. Server Certificate Exchange
@@ -265,6 +271,12 @@ but cannot directly determine the HTTP request contained inside the encrypted pa
 
 This is the central security benefit provided by TLS.
 
+<p align="center">
+  <img src="screenshots/02-encrypted-application-data.png"/>
+  <br/>
+  <em>Encrypted Application Data</em>
+</p>
+
 ---
 
 ## TLS Visibility Without Decryption
@@ -320,6 +332,12 @@ can now be dissected further as:
 HTTP
 ```
 
+<p align="center">
+  <img src="screenshots/02-encrypted-application-data.png"/>
+  <br/>
+  <em>Encrypted Application Data Now Visible As HTTP GET</em>
+</p>
+
 ---
 
 ### 8. HTTP Request Recovered
@@ -354,6 +372,12 @@ The network conversation can therefore now be analyzed at the application layer.
 
 This demonstrates that encryption does not destroy the underlying protocol data—it prevents observers without the necessary cryptographic material from reading it.
 
+<p align="center">
+  <img src="screenshots/04-decrypted-resource.png"/>
+  <br/>
+  <em>HTTP Requests Visible with Some Images Being Sent</em>
+</p>
+
 ---
 
 ### 9. Additional HTTP Resources Recovered
@@ -365,6 +389,12 @@ One request retrieves:
 ```text
 /icons/debian/openlogo-25.jpg
 ```
+
+<p align="center">
+  <img src="recovered/apache_pb.png"/>
+  <br/>
+  <em>Recovered Image</em>
+</p>
 
 This demonstrates that Wireshark is not merely identifying the initial HTTP request.
 
