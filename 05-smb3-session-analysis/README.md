@@ -2,80 +2,37 @@
 
 ## Scenario
 
-A packet capture containing Windows SMB traffic was analyzed to understand how a modern SMB session is established and used between two Windows hosts.
+This capture contained SMB traffic between two Windows hosts.
 
-The capture includes:
+Instead of just identifying SMB packets, I wanted to follow one session from beginning to end and understand what each stage looked like in Wireshark.
 
-* SMB dialect negotiation
+The session eventually included:
+
+* SMB negotiation
 * NTLM authentication
-* SMB session establishment
-* Connection to the `IPC$` share
-* Access to the `srvsvc` named pipe
-* SMB read and write operations
-
-The objective was to reconstruct the SMB communication sequence and identify the key protocol stages visible during normal Windows file-sharing and remote service communication.
-
-## Objectives
-
-* Identify the SMB client and server
-* Examine SMB dialect negotiation
-* Determine the selected SMB version
-* Examine authentication behavior
-* Identify the connected share
-* Identify named-pipe access
-* Observe SMB read/write operations
-* Develop useful Wireshark filters for SMB analysis
+* Access to `IPC$`
+* Opening the `srvsvc` named pipe
+* SMB read and write activity
 
 ## Initial Triage
 
-| Item               | Finding           |
-| ------------------ | ----------------- |
-| Total Packets      | 1,000             |
-| Capture Duration   | ~668.7 seconds    |
-| SMB Client         | `192.168.199.132` |
-| SMB Server         | `192.168.199.133` |
-| SMB Port           | TCP/445           |
-| Negotiated Dialect | SMB 3.1.1         |
-| Authentication     | NTLMSSP           |
-| Share Accessed     | `IPC$`            |
-| Named Pipe         | `srvsvc`          |
+| Item           | Finding           |
+| -------------- | ----------------- |
+| SMB Client     | `192.168.199.132` |
+| SMB Server     | `192.168.199.133` |
+| Server Port    | TCP/445           |
+| SMB Version    | SMB 3.1.1         |
+| Authentication | NTLMSSP           |
+| Share          | `IPC$`            |
+| Named Pipe     | `srvsvc`          |
 
-The primary SMB session of interest occurs between:
+The session I focused on was:
 
 ```text
 192.168.199.132 -> 192.168.199.133:445
 ```
 
-This identifies `192.168.199.132` as the SMB client and `192.168.199.133` as the server for the session analyzed below.
-
----
-
-## Analysis
-
-### 1. SMB Connection Identified
-
-Modern SMB commonly operates directly over:
-
-```text
-TCP/445
-```
-
-Filtering for:
-
-```text
-tcp.port == 445
-```
-
-reveals multiple TCP connections between:
-
-```text
-192.168.199.132
-192.168.199.133
-```
-
-The successful SMB session uses a client ephemeral port connecting to TCP port 445 on `192.168.199.133`.
-
-A more focused Wireshark filter is:
+A useful starting filter was:
 
 ```text
 ip.addr == 192.168.199.132 &&
@@ -85,15 +42,11 @@ tcp.port == 445
 
 ---
 
-### 2. SMB Dialect Negotiation
+## SMB Negotiation
 
-After the TCP connection is established, the client sends an SMB2:
+After the TCP connection was established, the client sent an SMB `NEGOTIATE` request.
 
-```text
-NEGOTIATE Request
-```
-
-The request advertises support for several SMB dialects:
+The client advertised support for several SMB versions:
 
 ```text
 SMB 2.0.2
@@ -103,41 +56,19 @@ SMB 3.0.2
 SMB 3.1.1
 ```
 
-At the protocol level, the dialect values include:
-
-```text
-0x0202
-0x0210
-0x0300
-0x0302
-0x0311
-```
-
-The server responds with a:
-
-```text
-NEGOTIATE Response
-```
-
-selecting:
-
-```text
-0x0311
-```
-
-which corresponds to:
+The server responded by selecting:
 
 ```text
 SMB 3.1.1
 ```
 
-This demonstrates how an SMB client and server determine the highest mutually supported dialect before continuing with authentication.
-
 <p align="center">
   <img src="screenshots/01-smb-negotiate.png"/>
   <br/>
-  <em>SMB 3.1.1</em>
+  <em>SMB 3.1.1 selected during negotiation</em>
 </p>
+
+This was the first part of the session that made the sequence easy to follow: the two systems agreed on the SMB version before moving on to authentication.
 
 Useful filter:
 
@@ -145,180 +76,117 @@ Useful filter:
 smb2.cmd == 0
 ```
 
-or simply:
-
-```text
-smb2
-```
-
-and inspect packets labeled:
-
-```text
-Negotiate Protocol Request
-Negotiate Protocol Response
-```
-
 ---
 
-### 3. Session Authentication Begins
+## Following the NTLM Authentication
 
-Following negotiation, the client sends:
+Next came the SMB `SESSION_SETUP` messages.
 
-```text
-SESSION_SETUP Request
-```
-
-The authentication data contains:
+The authentication data contained:
 
 ```text
 NTLMSSP
 ```
 
-indicating the use of NTLM authentication.
+so I knew NTLM was being used.
 
-The server initially responds with:
+One of the server responses returned:
 
 ```text
 STATUS_MORE_PROCESSING_REQUIRED
-```
-
-represented by:
-
-```text
 0xC0000016
 ```
 
-This is expected during NTLM challenge-response authentication and does not by itself indicate an error.
+At first glance, the word "status" made this look like it could be an error, but this is a normal part of the NTLM challenge-response process.
 
-The client then sends another `SESSION_SETUP` message containing additional NTLM authentication data.
+The client then sent another `SESSION_SETUP` containing the next part of the authentication exchange.
 
-The capture exposes Windows host information in this exchange, including names such as:
+<p align="center">
+  <img src="screenshots/02-ntlm-session-setup.png"/>
+  <br/>
+  <em>NTLM authentication during SMB session setup</em>
+</p>
+
+The exchange also exposed some Windows metadata, including hostnames such as:
 
 ```text
 DESKTOP-2AEFM7G
 DESKTOP-V1FA0UQ
 ```
 
-and a user-related string:
+and the string:
 
 ```text
 Willi Wireshark
 ```
 
-This demonstrates that authentication exchanges can expose useful host and identity metadata even when credentials themselves are not transmitted in plaintext.
-
-<p align="center">
-  <img src="screenshots/02-ntlm-session-setup.png"/>
-  <br/>
-  <em>NTLM Session Setup</em>
-</p>
+The credentials themselves weren't visible in plaintext, but the authentication traffic still revealed useful host and identity information.
 
 ---
 
-### 4. Failed Authentication Attempts
+## Authentication Failures
 
-Several earlier SMB authentication sequences do not complete successfully.
+There were also several earlier session attempts that didn't succeed.
 
-The server returns:
+Those returned:
 
 ```text
 STATUS_LOGON_FAILURE
-```
-
-with status:
-
-```text
 0xC000006D
 ```
 
-after some `SESSION_SETUP` exchanges.
+This was useful to compare against `STATUS_MORE_PROCESSING_REQUIRED`.
 
-These unsuccessful attempts are followed by new SMB connections and additional authentication attempts.
+The difference matters:
 
-Eventually, a later session completes successfully.
+```text
+0xC0000016 -> authentication is still in progress
+0xC000006D -> authentication failed
+```
 
-This distinction is useful during incident analysis because repeated SMB authentication failures can indicate:
-
-* Mistyped credentials
-* Expired credentials
-* Automated authentication attempts
-* Password spraying
-* Lateral movement attempts
-
-In this capture, however, the packets alone establish only that multiple authentication attempts occur; they do not establish malicious intent.
-
----
-
-### 5. Successful SMB Session
-
-A later authentication exchange receives:
+After several failed attempts, a later session returned:
 
 ```text
 STATUS_SUCCESS
 ```
 
-from the server.
+At that point I knew the client had successfully authenticated to the server.
 
-At this point, the client has established a valid SMB session with:
-
-```text
-192.168.199.133
-```
-
-The subsequent packets progress beyond authentication into resource access.
-
-The sequence can be summarized as:
+The basic progression was:
 
 ```text
 TCP Connection
       ↓
 SMB NEGOTIATE
       ↓
-SMB SESSION_SETUP
+SESSION_SETUP
       ↓
-NTLM Authentication
+NTLM Challenge/Response
       ↓
-Successful Session
+STATUS_SUCCESS
 ```
 
 ---
 
-### 6. IPC$ Tree Connection
+## Connecting to IPC$
 
-Once authentication succeeds, the client sends an SMB:
-
-```text
-TREE_CONNECT Request
-```
-
-for:
+Once authentication succeeded, the client sent a `TREE_CONNECT` request for:
 
 ```text
 \\192.168.199.133\IPC$
 ```
 
-The server responds successfully.
-
 <p align="center">
   <img src="screenshots/03-ipc-tree-connect.png"/>
   <br/>
-  <em>Tree Connectionp</em>
+  <em>Successful connection to the IPC$ share</em>
 </p>
 
+`IPC$` is different from a normal file share. It is commonly used for Windows interprocess communication and remote administrative activity.
 
-`IPC$` is a special Windows administrative share used for interprocess communication rather than ordinary file storage.
+Seeing it here wasn't automatically suspicious. It just told me that the client was moving beyond authentication into Windows service communication.
 
-It is commonly involved in:
-
-* Named-pipe communication
-* RPC
-* Windows administrative operations
-* Service enumeration
-* Remote management
-
-The presence of `IPC$` by itself is normal in Windows environments.
-
-Useful Wireshark filter:
+Useful filter:
 
 ```text
 smb2.cmd == 3
@@ -326,31 +194,19 @@ smb2.cmd == 3
 
 ---
 
-### 7. Named-Pipe Access
+## Opening the srvsvc Named Pipe
 
-Following the `IPC$` connection, the client issues an SMB:
-
-```text
-CREATE Request
-```
-
-for:
+After connecting to `IPC$`, the client sent an SMB `CREATE` request for:
 
 ```text
 srvsvc
 ```
 
-This refers to the Windows Server Service RPC named pipe.
+The server accepted it.
 
-The server responds successfully, allowing subsequent communication through the pipe.
+`srvsvc` is a Windows Server Service RPC named pipe and can be used for things like querying server information or enumerating network shares.
 
-`srvsvc` is associated with Server Service RPC functionality and may be used for operations such as:
-
-* Enumerating shares
-* Querying server information
-* Accessing Windows networking information
-
-The sequence is therefore:
+The sequence now looked like:
 
 ```text
 TREE_CONNECT -> IPC$
@@ -360,39 +216,15 @@ CREATE -> srvsvc
 RPC-related communication
 ```
 
----
-
-### 8. SMB IOCTL Activity
-
-The session also contains:
-
-```text
-IOCTL Request
-IOCTL Response
-```
-
-messages.
-
-SMB IOCTL operations allow clients to issue control requests to a server or an opened resource.
-
-These messages commonly appear during named-pipe and RPC-related SMB communication.
-
-The presence of IOCTL traffic following an `IPC$` tree connection is therefore consistent with Windows interprocess communication.
+This helped make sense of the packets that followed. SMB wasn't being used simply to copy a file—it was acting as the transport for Windows RPC communication.
 
 ---
 
-### 9. SMB Read and Write Operations
+## Read and Write Activity
 
-After opening the named pipe, the client begins exchanging:
+After opening `srvsvc`, the session began exchanging SMB `WRITE` and `READ` requests.
 
-```text
-WRITE
-READ
-```
-
-requests with the server.
-
-The sequence includes:
+The pattern included:
 
 ```text
 WRITE Request
@@ -406,35 +238,23 @@ WRITE Response
 
 READ Request
 READ Response
-```
-
-The requests originate from:
-
-```text
-192.168.199.132
-```
-
-and the responses originate from:
-
-```text
-192.168.199.133
 ```
 
 <p align="center">
   <img src="screenshots/04-srvsvc-read-write.png"/>
   <br/>
-  <em>Tree Connectionp</em>
+  <em>SMB read and write activity through the srvsvc pipe</em>
 </p>
 
-These SMB operations carry the data exchanged through the opened `srvsvc` pipe.
+These operations were carrying data through the named pipe.
 
-This demonstrates that SMB acts as the transport mechanism for higher-level Windows communication rather than simply transferring files.
+That was one of the more useful things I took from the capture. SMB traffic doesn't necessarily mean someone is browsing a shared folder or transferring files. SMB can also carry higher-level Windows communication like RPC over named pipes.
 
 ---
 
-## SMB Session Sequence
+## Session Flow
 
-The successful session can be summarized as:
+Putting everything together, the successful session looked like this:
 
 ```text
 192.168.199.132                     192.168.199.133
@@ -461,88 +281,14 @@ The successful session can be summarized as:
       | <------ WRITE / READ ------------- |
 ```
 
----
-
-## SMB Commands Observed
-
-| SMB Command     | Purpose                               |
-| --------------- | ------------------------------------- |
-| `NEGOTIATE`     | Select SMB dialect and capabilities   |
-| `SESSION_SETUP` | Authenticate and create a session     |
-| `TREE_CONNECT`  | Connect to an SMB share               |
-| `IOCTL`         | Send control operations               |
-| `CREATE`        | Open a file, directory, or named pipe |
-| `QUERY_INFO`    | Request information about an object   |
-| `WRITE`         | Send data                             |
-| `READ`          | Retrieve data                         |
-| `CLOSE`         | Close an opened object                |
-
----
-
-## Indicators and Artifacts
-
-| Type                          | Value             |
-| ----------------------------- | ----------------- |
-| SMB Client                    | `192.168.199.132` |
-| SMB Server                    | `192.168.199.133` |
-| Server Port                   | TCP/445           |
-| SMB Version                   | SMB 3.1.1         |
-| Authentication                | NTLMSSP           |
-| Successful Share              | `IPC$`            |
-| Named Pipe                    | `srvsvc`          |
-| Authentication Failure Status | `0xC000006D`      |
-| NTLM Intermediate Status      | `0xC0000016`      |
-
-These values represent artifacts of the sample environment and are not general indicators of compromise.
-
----
-
-## Security Significance
-
-SMB is an important protocol for both legitimate Windows administration and attacker activity.
-
-The same SMB operations visible in this capture can also appear during:
-
-* Remote administration
-* Lateral movement
-* Share enumeration
-* Credential attacks
-* Remote service interaction
-* Named-pipe communication
-
-For that reason, detecting malicious SMB activity requires context.
-
-For example:
-
-```text
-IPC$ connection
-```
-
-or:
-
-```text
-srvsvc access
-```
-
-should not automatically be treated as malicious.
-
-Instead, an analyst should consider:
-
-* Which host initiated the connection
-* Which user authenticated
-* Whether authentication repeatedly failed
-* Which shares or named pipes were accessed
-* What activity occurred before and after the SMB connection
-* Whether the behavior is expected for the systems involved
-
-This capture provides a useful baseline for understanding what legitimate SMB session establishment looks like before attempting to identify malicious SMB behavior.
+This was probably the clearest way to understand the capture as a whole.
 
 ---
 
 ## Useful Wireshark Filters
 
 ```text
-# All SMB2/SMB3 traffic
+# All SMB2 / SMB3 traffic
 smb2
 
 # SMB traffic between the two hosts
@@ -559,7 +305,7 @@ smb2.cmd == 1
 # Tree connections
 smb2.cmd == 3
 
-# File or named-pipe creation
+# CREATE requests
 smb2.cmd == 5
 
 # Read operations
@@ -570,33 +316,16 @@ smb2.cmd == 9
 
 # IOCTL
 smb2.cmd == 11
-
-# Query information
-smb2.cmd == 16
 ```
 
-## Conclusion
+## Takeaway
 
-Analysis of the packet capture identified an SMB3 session between client `192.168.199.132` and server `192.168.199.133` over TCP port 445.
+The most useful part of this capture was being able to follow an SMB session as a sequence instead of treating each packet independently.
 
-During SMB negotiation, the client advertised support for SMB versions ranging from SMB 2.0.2 through SMB 3.1.1. The server selected SMB 3.1.1.
+The client and server first negotiated SMB 3.1.1, then worked through NTLM authentication. After several failed attempts, one session succeeded.
 
-Authentication then proceeded using NTLMSSP. Several earlier session attempts resulted in `STATUS_LOGON_FAILURE`, while a later exchange successfully established an authenticated SMB session.
+From there, the client connected to `IPC$`, opened the `srvsvc` named pipe, and began exchanging read and write data through SMB.
 
-The client subsequently connected to:
+It also gave me a better baseline for what normal SMB activity can look like. Things like `IPC$`, `srvsvc`, and named-pipe traffic can appear in both legitimate administration and malicious lateral movement, so seeing them alone isn't enough to call the activity suspicious.
 
-```text
-\\192.168.199.133\IPC$
-```
-
-and opened the:
-
-```text
-srvsvc
-```
-
-named pipe.
-
-The session then contained SMB IOCTL, write, read, query, and close operations consistent with Windows interprocess and RPC-related communication.
-
-This analysis demonstrates the complete lifecycle of a modern SMB session and provides a baseline for recognizing SMB negotiation, authentication, administrative shares, named pipes, and subsequent data exchange in network traffic.
+The surrounding context—who connected, whether authentication succeeded, what resource was opened, and what happened afterward—is what makes the traffic meaningful.
