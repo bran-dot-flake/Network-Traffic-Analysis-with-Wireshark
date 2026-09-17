@@ -41,12 +41,6 @@ The exact role of `192.168.100.101` varies between captures. It is used as the z
 
 ### 1. Default Nmap Scan
 
-<p align="center">
-  <img src="screenshots/01-standard-syn-scan.png"/>
-  <br/>
-  <em>Standard SYN Scan</em>
-</p>
-
 The standard scan capture contains approximately:
 
 ```text
@@ -84,6 +78,13 @@ TCP/1025
 TCP/3389
 TCP/8080
 ```
+
+<p align="center">
+  <img src="screenshots/01-standard-syn-scan.png"/>
+  <br/>
+  <em>Standard SYN Scan</em>
+</p>
+
 
 Approximately 2,000 SYN packets appear in the capture.
 
@@ -237,12 +238,6 @@ The spoofed address also demonstrates why a packet's source IP should not always
 
 ### 4. Idle / Zombie Scan
 
-<p align="center">
-  <img src="screenshots/04-zombie-ipid.png"/>
-  <br/>
-  <em>Zombie IPID Scan</em>
-</p>
-
 The zombie scan is the most complex technique in the collection.
 
 Three hosts participate:
@@ -295,6 +290,12 @@ The IPv4 Identification values in the zombie's responses increase sequentially:
 ```
 
 This predictable IP ID behavior is what makes the host useful for an idle scan.
+
+<p align="center">
+  <img src="screenshots/04-zombie-ipid.png"/>
+  <br/>
+  <em>Zombie IPID Scan</em>
+</p>
 
 During the actual target probe, packets appear as:
 
@@ -407,12 +408,6 @@ The scan therefore fails to produce a successful operating-system identification
 
 ### 6. Successful OS Fingerprinting
 
-<p align="center">
-  <img src="screenshots/05-os-fingerprint-open-port.png"/>
-  <br/>
-  <em>OF Fingerprint Scan With Open Port</em>
-</p>
-
 The successful OS scan instead targets:
 
 ```text
@@ -461,6 +456,12 @@ RST
 ```
 
 The capture also contains RST responses associated with closed ports.
+
+<p align="center">
+  <img src="screenshots/05-os-fingerprint-open-port.png"/>
+  <br/>
+  <em>OF Fingerprint Scan With Open Port</em>
+</p>
 
 Having observable behavior from both an open and closed TCP port gives Nmap additional information for TCP/IP stack fingerprinting.
 
