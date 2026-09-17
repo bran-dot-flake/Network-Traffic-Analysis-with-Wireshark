@@ -133,6 +133,12 @@ SMB 3.1.1
 
 This demonstrates how an SMB client and server determine the highest mutually supported dialect before continuing with authentication.
 
+<p align="center">
+  <img src="screenshots/01-smb-negotiate.png"/>
+  <br/>
+  <em>SMB 3.1.1</em>
+</p>
+
 Useful filter:
 
 ```text
@@ -200,6 +206,12 @@ Willi Wireshark
 ```
 
 This demonstrates that authentication exchanges can expose useful host and identity metadata even when credentials themselves are not transmitted in plaintext.
+
+<p align="center">
+  <img src="screenshots/02-ntlm-session-setup.png"/>
+  <br/>
+  <em>NTLM Session Setup</em>
+</p>
 
 ---
 
@@ -286,6 +298,13 @@ for:
 ```
 
 The server responds successfully.
+
+<p align="center">
+  <img src="screenshots/03-ipc-tree-connect.png"/>
+  <br/>
+  <em>Tree Connectionp</em>
+</p>
+
 
 `IPC$` is a special Windows administrative share used for interprocess communication rather than ordinary file storage.
 
@@ -400,6 +419,12 @@ and the responses originate from:
 ```text
 192.168.199.133
 ```
+
+<p align="center">
+  <img src="screenshots/04-srvsvc-read-write.png"/>
+  <br/>
+  <em>Tree Connectionp</em>
+</p>
 
 These SMB operations carry the data exchanged through the opened `srvsvc` pipe.
 
