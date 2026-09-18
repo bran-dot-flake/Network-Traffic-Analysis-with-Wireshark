@@ -22,12 +22,12 @@ Each folder contains a short walkthrough of what I found, the filters I used, an
 | Case                                                                            | Focus                                                    |
 | ------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | [01 - HTTP Object Recovery](./01-http-object-recovery/)                         | Recovering files from cleartext HTTP                     |
-| [02 - Nmap Scan Analysis](./02-nmap-scan-analysis/)                             | Recognizing different Nmap scan patterns                 |
-| [03 - Remote Shell Protocol Misuse](./03-remote-shell-protocol-misuse/)         | Identifying a Windows shell running over TCP/53          |
-| [04 - Teardrop Fragmentation Attack](./04-teardrop-fragmentation-attack/)       | Investigating overlapping IPv4 fragments                 |
+| [02 - Nmap Scan Analysis](./02-nmap-port-scan/)                                 | Recognizing different Nmap scan patterns                 |
+| [03 - Remote Shell Protocol Misuse](./03-dns-remote-shell/)                     | Identifying a Windows shell running over TCP/53          |
+| [04 - Teardrop Fragmentation Attack](./04-teardrop-attack/)                     | Investigating overlapping IPv4 fragments                 |
 | [05 - SMB3 Session Analysis](./05-smb3-session-analysis/)                       | Following SMB negotiation, NTLM, and named-pipe activity |
-| [06 - Kerberos Authentication Analysis](./06-kerberos-authentication-analysis/) | Following TGT and service-ticket requests                |
-| [07 - TLS Decryption Analysis](./07-tls-decryption-analysis/)                   | Decrypting an older RSA-based TLS session                |
+| [06 - Kerberos Authentication Analysis](./06-kerberos-authentication/)          | Following TGT and service-ticket requests                |
+| [07 - TLS Decryption Analysis](./07-tls-decryption/)                            | Decrypting an older RSA-based TLS session                |
 
 ## Tools
 
